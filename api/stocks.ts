@@ -19,10 +19,33 @@ export async function fetchStocksAndIndex() {
   const timestampIso = new Date().toISOString();
   let dbsDebugInfo: any = null;
 
+  const endDate = new Date();
+  const startDate = new Date();
+  startDate.setFullYear(startDate.getFullYear() - 1);
+
+  // 1. Fetch quotes and charts in parallel using Promise.allSettled
   const stockResults = await Promise.allSettled(
     SGX_TICKERS.map(async (def) => {
-      const quote: any = await yahooFinance.quote(def.code);
-      return { def, quote };
+      let quote: any = null;
+      let chartRes: any = null;
+
+      try {
+        quote = await yahooFinance.quote(def.code);
+      } catch (e) {
+        console.warn(`Quote failed for ${def.code}:`, e);
+      }
+
+      try {
+        chartRes = await yahooFinance.chart(def.code, {
+          period1: startDate,
+          period2: endDate,
+          interval: '1d'
+        });
+      } catch (e) {
+        console.warn(`Chart history failed for ${def.code}:`, e);
+      }
+
+      return { def, quote, chartRes };
     })
   );
 
@@ -36,20 +59,76 @@ export async function fetchStocksAndIndex() {
   const stocksList = SGX_TICKERS.map((def, idx) => {
     const res = stockResults[idx];
     if (res.status === 'fulfilled') {
-      const { quote } = res.value;
-      const price = Number.isFinite(Number(quote.regularMarketPrice)) ? Number(quote.regularMarketPrice) : null;
-      const previousClose = Number.isFinite(Number(quote.regularMarketPreviousClose)) ? Number(quote.regularMarketPreviousClose) : null;
-      const change = Number.isFinite(Number(quote.regularMarketChange)) ? Number(quote.regularMarketChange) : null;
-      const changePercent = Number.isFinite(Number(quote.regularMarketChangePercent)) ? Number(quote.regularMarketChangePercent) : null;
-      const open = Number.isFinite(Number(quote.regularMarketOpen)) ? Number(quote.regularMarketOpen) : null;
-      const high = Number.isFinite(Number(quote.regularMarketDayHigh)) ? Number(quote.regularMarketDayHigh) : null;
-      const low = Number.isFinite(Number(quote.regularMarketDayLow)) ? Number(quote.regularMarketDayLow) : null;
-      const volumeNum = Number.isFinite(Number(quote.regularMarketVolume)) ? Number(quote.regularMarketVolume) : null;
+      const { quote, chartRes } = res.value;
+      const price = quote && Number.isFinite(Number(quote.regularMarketPrice)) ? Number(quote.regularMarketPrice) : null;
+      const previousClose = quote && Number.isFinite(Number(quote.regularMarketPreviousClose)) ? Number(quote.regularMarketPreviousClose) : null;
+      const change = quote && Number.isFinite(Number(quote.regularMarketChange)) ? Number(quote.regularMarketChange) : null;
+      const changePercent = quote && Number.isFinite(Number(quote.regularMarketChangePercent)) ? Number(quote.regularMarketChangePercent) : null;
+      const open = quote && Number.isFinite(Number(quote.regularMarketOpen)) ? Number(quote.regularMarketOpen) : null;
+      const high = quote && Number.isFinite(Number(quote.regularMarketDayHigh)) ? Number(quote.regularMarketDayHigh) : null;
+      const low = quote && Number.isFinite(Number(quote.regularMarketDayLow)) ? Number(quote.regularMarketDayLow) : null;
+      const volumeNum = quote && Number.isFinite(Number(quote.regularMarketVolume)) ? Number(quote.regularMarketVolume) : null;
       const volumeStr = volumeNum != null ? (volumeNum > 1000000 ? `${(volumeNum / 1000000).toFixed(1)}M` : `${volumeNum}`) : null;
-      const high52w = Number.isFinite(Number(quote.fiftyTwoWeekHigh)) ? Number(quote.fiftyTwoWeekHigh) : null;
-      const low52w = Number.isFinite(Number(quote.fiftyTwoWeekLow)) ? Number(quote.fiftyTwoWeekLow) : null;
+      const high52w = quote && Number.isFinite(Number(quote.fiftyTwoWeekHigh)) ? Number(quote.fiftyTwoWeekHigh) : null;
+      const low52w = quote && Number.isFinite(Number(quote.fiftyTwoWeekLow)) ? Number(quote.fiftyTwoWeekLow) : null;
 
-      if (def.code === "D05.SI") {
+      // Process historical observations for 12-Month Simple Mean, Shock-Filtered Mean, and historical monthly chart
+      let twelveMonthAvg: number | null = null;
+      let twelveMonthTrimmedMean: number | null = null;
+      const historicalMonthly: any[] = [];
+
+      if (chartRes && Array.isArray(chartRes.quotes)) {
+        const validPrices = chartRes.quotes
+          .map((q: any) => q.adjclose ?? q.close)
+          .filter((v: any): v is number => v !== null && Number.isFinite(v));
+
+        if (validPrices.length >= 10) {
+          // Simple Mean
+          const sum = validPrices.reduce((acc: number, val: number) => acc + val, 0);
+          const simpleMean = sum / validPrices.length;
+          twelveMonthAvg = Number(simpleMean.toFixed(2));
+
+          // Shock-Filtered Mean (10% two-sided trim)
+          const sorted = [...validPrices].sort((a, b) => a - b);
+          const trimCount = Math.floor(sorted.length * 0.10);
+          const trimmed = trimCount > 0 ? sorted.slice(trimCount, sorted.length - trimCount) : sorted;
+          const trimmedSum = trimmed.reduce((acc: number, val: number) => acc + val, 0);
+          const shockFilteredMean = trimmedSum / trimmed.length;
+          twelveMonthTrimmedMean = Number(shockFilteredMean.toFixed(2));
+
+          if (def.code === "D05.SI") {
+            console.log(`[DBS Historical Diagnostics]`);
+            console.log(`A. Valid historical daily observations received: ${validPrices.length}`);
+            console.log(`B. Earliest historical date: ${chartRes.quotes[0]?.date}`);
+            console.log(`C. Latest historical date: ${chartRes.quotes[chartRes.quotes.length - 1]?.date}`);
+            console.log(`D. Actual calculated 12-month Simple Mean: ${twelveMonthAvg}`);
+            console.log(`E. Number removed by 10% lower trim: ${trimCount}`);
+            console.log(`F. Number removed by 10% upper trim: ${trimCount}`);
+            console.log(`G. Actual calculated Shock-Filtered Mean: ${twelveMonthTrimmedMean}`);
+          }
+        }
+
+        // Monthly aggregation
+        const monthlyMap = new Map<string, number>();
+        chartRes.quotes.forEach((q: any) => {
+          const val = q.adjclose ?? q.close;
+          if (q.date && val !== null && Number.isFinite(val)) {
+            const d = new Date(q.date);
+            const monthName = d.toLocaleString('en-US', { month: 'short', year: '2-digit' });
+            monthlyMap.set(monthName, Number(val));
+          }
+        });
+
+        monthlyMap.forEach((monthlyPrice, month) => {
+          historicalMonthly.push({
+            month,
+            price: monthlyPrice,
+            shockFiltered: twelveMonthTrimmedMean ?? monthlyPrice
+          });
+        });
+      }
+
+      if (def.code === "D05.SI" && quote) {
         dbsDebugInfo = {
           symbolRequested: def.code,
           rawSymbol: quote.symbol || null,
@@ -61,13 +140,15 @@ export async function fetchStocksAndIndex() {
           dayHigh: quote.regularMarketDayHigh ?? null,
           dayLow: quote.regularMarketDayLow ?? null,
           volume: quote.regularMarketVolume ?? null,
-          yahooTimestamp: quote.regularMarketTime ? new Date(quote.regularMarketTime).toISOString() : null
+          yahooTimestamp: quote.regularMarketTime ? new Date(quote.regularMarketTime).toISOString() : null,
+          twelveMonthAvg,
+          twelveMonthTrimmedMean
         };
       }
 
       return {
         code: def.code,
-        name: quote.longName || quote.shortName || def.name,
+        name: quote?.longName || quote?.shortName || def.name,
         sector: def.sector,
         price,
         previousClose,
@@ -77,12 +158,12 @@ export async function fetchStocksAndIndex() {
         high,
         low,
         volume: volumeStr,
-        currency: quote.currency || "SGD",
-        marketOpen: quote.marketState === "REGULAR",
+        currency: quote?.currency || "SGD",
+        marketOpen: quote?.marketState === "REGULAR",
         dataStatus: price != null ? "delayed" : "unavailable",
         source: "Yahoo Finance",
-        twelveMonthAvg: null,
-        twelveMonthTrimmedMean: null,
+        twelveMonthAvg,
+        twelveMonthTrimmedMean,
         forecast: price != null ? {
           nextWeek: Number((price * 1.015).toFixed(2)),
           oneMonth: Number((price * 1.035).toFixed(2)),
@@ -92,21 +173,21 @@ export async function fetchStocksAndIndex() {
           threeMonthConf: "72%",
           type: "Model-generated forecast"
         } : null,
-        historical: [],
+        historical: historicalMonthly,
         metrics: {
           dataType: "yahoo-finance",
-          peRatio: quote.trailingPE != null ? Number(quote.trailingPE) : def.pe,
-          dividendYield: quote.dividendYield != null ? Number(quote.dividendYield) * 100 : def.divYield,
-          marketCap: quote.marketCap != null ? `${(quote.marketCap / 1e9).toFixed(1)}B` : null,
-          high52w,
-          low52w,
+          peRatio: quote?.trailingPE != null ? Number(quote.trailingPE) : def.pe,
+          dividendYield: quote?.dividendYield != null ? Number(quote.dividendYield) * 100 : def.divYield,
+          marketCap: quote?.marketCap != null ? `${(quote.marketCap / 1e9).toFixed(1)}B` : null,
+          high52w: quote?.fiftyTwoWeekHigh != null ? Number(quote.fiftyTwoWeekHigh) : null,
+          low52w: quote?.fiftyTwoWeekLow != null ? Number(quote.fiftyTwoWeekLow) : null,
           volatility: null,
           rsi: def.rsi,
-          beta: quote.beta != null ? Number(quote.beta) : def.beta,
+          beta: quote?.beta != null ? Number(quote.beta) : def.beta,
           analystConsensus: def.consensus
         },
         description: def.desc,
-        dataTimestamp: quote.regularMarketTime ? new Date(quote.regularMarketTime).toISOString() : timestampIso
+        dataTimestamp: quote?.regularMarketTime ? new Date(quote.regularMarketTime).toISOString() : timestampIso
       };
     } else {
       return {
@@ -156,6 +237,7 @@ export async function fetchStocksAndIndex() {
     timestamp: timestampIso,
     source: "Yahoo Finance",
     exchange: "Singapore Exchange / SGX",
+    discoveredExchangeCode: "SI",
     debugDBS: dbsDebugInfo,
     stiIndex: {
       value: stiValue,

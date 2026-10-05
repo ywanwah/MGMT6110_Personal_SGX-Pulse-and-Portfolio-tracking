@@ -816,7 +816,7 @@ export default function App() {
                     <div className="text-2xl font-bold font-mono tracking-tight text-emerald-300 tabular-nums">
                       {selectedStock.twelveMonthTrimmedMean !== null ? selectedStock.twelveMonthTrimmedMean.toFixed(2) : 'N/A'} <span className="text-xs font-sans text-emerald-400/80">{selectedStock.currency}</span>
                     </div>
-                    <div className="text-xs text-emerald-400/70 mt-1">Trimmed mean baseline</div>
+                    <div className="text-xs text-emerald-400/70 mt-1">10% trimmed mean baseline</div>
                   </div>
 
                   {/* Card 4: 1-Month Forecast */}
