@@ -3,6 +3,8 @@ import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { fetchStocksAndIndex } from './api/stocks.ts';
+import { fetchTickerNews } from './api/news.ts';
+import { fetchGlobalNews } from './api/global-news.ts';
 
 dotenv.config();
 
@@ -31,6 +33,42 @@ app.get('/api/stocks', async (req, res) => {
     return res.status(500).json({
       success: false,
       error: err.message || "Failed to retrieve Yahoo Finance market data."
+    });
+  }
+});
+
+app.get('/api/news', async (req, res) => {
+  try {
+    const symbol = req.query.symbol as string;
+    if (!symbol) {
+      return res.status(400).json({ success: false, error: "Missing symbol parameter" });
+    }
+    const data = await fetchTickerNews(symbol);
+    res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(200).json(data);
+  } catch (err: any) {
+    console.error("Ticker News API error:", err);
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to retrieve Yahoo Finance news."
+    });
+  }
+});
+
+app.get('/api/global-news', async (req, res) => {
+  try {
+    const data = await fetchGlobalNews();
+    res.setHeader('Cache-Control', 'public, s-maxage=300, stale-while-revalidate=600');
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(200).json(data);
+  } catch (err: any) {
+    console.error("Global News API error:", err);
+    res.setHeader('Content-Type', 'application/json');
+    return res.status(500).json({
+      success: false,
+      error: err.message || "Failed to retrieve global macro news."
     });
   }
 });

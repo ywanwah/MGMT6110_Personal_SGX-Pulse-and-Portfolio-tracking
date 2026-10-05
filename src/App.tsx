@@ -35,7 +35,6 @@ interface Stock {
     month: string;
     price: number;
     shockFiltered: number;
-    volume: string;
   }[];
   metrics: {
     dataType: string;
@@ -81,6 +80,16 @@ interface MarketData {
   stocks: Stock[];
 }
 
+interface NewsArticle {
+  id: string;
+  title: string;
+  publisher: string;
+  url: string;
+  publishedAt: number;
+  relatedTickers: string[];
+  thumbnail: string | null;
+}
+
 export default function App() {
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -109,6 +118,14 @@ export default function App() {
   // Calculator state
   const [calcShares, setCalcShares] = useState<number>(1000);
 
+  // News state
+  const [tickerNews, setTickerNews] = useState<NewsArticle[]>([]);
+  const [globalNews, setGlobalNews] = useState<NewsArticle[]>([]);
+  const [tickerNewsLoading, setTickerNewsLoading] = useState<boolean>(false);
+  const [globalNewsLoading, setGlobalNewsLoading] = useState<boolean>(false);
+  const [tickerNewsError, setTickerNewsError] = useState<string | null>(null);
+  const [globalNewsError, setGlobalNewsError] = useState<string | null>(null);
+
   useEffect(() => {
     fetchStocks();
   }, []);
@@ -133,6 +150,73 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Fetch ticker news when selectedStockCode changes
+  useEffect(() => {
+    if (selectedStockCode) {
+      fetchTickerNews(selectedStockCode);
+    }
+  }, [selectedStockCode]);
+
+  const fetchTickerNews = async (symbol: string) => {
+    try {
+      setTickerNewsLoading(true);
+      setTickerNewsError(null);
+      const res = await fetch(`/api/news?symbol=${encodeURIComponent(symbol)}`);
+      const data = await res.json();
+      if (data.success) {
+        setTickerNews(data.articles || []);
+      } else {
+        setTickerNewsError(data.error || "Failed to load news");
+      }
+    } catch (err: any) {
+      console.error("Failed to fetch ticker news:", err);
+      setTickerNewsError("Unable to load news feed.");
+    } finally {
+      setTickerNewsLoading(false);
+    }
+  };
+
+  // Fetch global news when activeTab === 'global-news'
+  useEffect(() => {
+    if (activeTab === 'global-news' && globalNews.length === 0) {
+      fetchGlobalNews();
+    }
+  }, [activeTab]);
+
+  const fetchGlobalNews = async () => {
+    try {
+      setGlobalNewsLoading(true);
+      setGlobalNewsError(null);
+      const res = await fetch('/api/global-news');
+      const data = await res.json();
+      if (data.success) {
+        setGlobalNews(data.articles || []);
+      } else {
+        setGlobalNewsError(data.error || "Failed to load global news");
+      }
+    } catch (err: any) {
+      console.error("Failed to fetch global news:", err);
+      setGlobalNewsError("Global market news is temporarily unavailable.");
+    } finally {
+      setGlobalNewsLoading(false);
+    }
+  };
+
+  const formatRelativeTime = (timestamp: number) => {
+    const now = Date.now();
+    const diffMs = now - timestamp;
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 1) return "Just now";
+    if (diffMins < 60) return `${diffMins} min ago`;
+    if (diffHours < 24) return `${diffHours} hr ago`;
+    if (diffDays === 1) return "Yesterday";
+    if (diffDays < 7) return `${diffDays} days ago`;
+    return new Date(timestamp).toLocaleString('en-SG', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   const selectedStock = marketData?.stocks.find(s => s.code === selectedStockCode) || marketData?.stocks[0];
@@ -243,32 +327,6 @@ export default function App() {
     };
   }).filter(Boolean);
 
-  const getStockNews = (stock: Stock) => {
-    return [
-      {
-        id: 1,
-        title: `${stock.name} (${stock.code}) Reports Quarterly Performance Update`,
-        source: "SGX Research Wire (Source: EODHD)",
-        time: "2 hours ago",
-        sentiment: stock.price !== null ? "Neutral" : "Unavailable",
-        impact: "Medium",
-        summary: `Market feeds sourced via EODHD for ${stock.name}.`
-      }
-    ];
-  };
-
-  const globalNews = [
-    {
-      id: 1,
-      title: "US Federal Reserve Signals Patient Approach to Rate Trajectory",
-      source: "Reuters Financial (EODHD Feed)",
-      time: "1 hour ago",
-      sentiment: "Neutral",
-      impact: "High",
-      summary: "Global macroeconomic updates affecting Asian equity liquidity."
-    }
-  ];
-
   const getRecommendation = (stock: Stock, horizon: 'week' | 'month' | '3month') => {
     if (stock.price === null || !stock.forecast) return { label: "N/A", color: "text-slate-400 bg-slate-800 border-slate-700" };
     let target = stock.price;
@@ -351,51 +409,46 @@ export default function App() {
           </button>
         </div>
 
+        {/* Right Status */}
         <div className="flex items-center gap-3">
+          {marketData && (
+            <div className="hidden md:flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span>Yahoo Finance</span>
+            </div>
+          )}
           <button 
-            onClick={fetchStocks} 
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors border border-slate-700 text-xs flex items-center gap-1.5"
+            onClick={fetchStocks}
+            disabled={loading}
+            className="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-300 transition-colors"
             title="Refresh Data"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">Sync</span>
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
-          <div className="hidden xl:flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-800">
-            <Database className="w-3 h-3 text-emerald-400" />
-            <span>Delayed market data (EODHD)</span>
-          </div>
         </div>
       </header>
 
-      {/* Main Container */}
-      <main className="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
-        {apiError ? (
-          <div className="bg-rose-950/60 border border-rose-800 rounded-2xl p-6 text-center space-y-3">
-            <AlertCircle className="w-8 h-8 text-rose-400 mx-auto" />
-            <h2 className="text-lg font-bold text-white">Market Data Unavailable</h2>
-            <p className="text-xs text-rose-200 max-w-md mx-auto">{apiError}</p>
-            <button onClick={fetchStocks} className="px-4 py-2 bg-rose-900 hover:bg-rose-800 text-white text-xs font-medium rounded-lg">
+      {/* Main Content Area */}
+      <main className="max-w-7xl mx-auto px-6 py-8">
+        {loading && !marketData ? (
+          <div className="flex flex-col items-center justify-center py-32 space-y-4">
+            <RefreshCw className="w-8 h-8 text-emerald-500 animate-spin" />
+            <p className="text-sm font-mono text-slate-400">Retrieving live SGX quotes from Yahoo Finance...</p>
+          </div>
+        ) : apiError && !marketData ? (
+          <div className="bg-slate-900 border border-rose-900/50 rounded-2xl p-12 text-center space-y-3">
+            <AlertCircle className="w-10 h-10 text-rose-400 mx-auto" />
+            <h3 className="text-lg font-bold text-white">Market Data Unavailable</h3>
+            <p className="text-xs text-slate-400 max-w-md mx-auto">{apiError}</p>
+            <button 
+              onClick={fetchStocks}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-medium transition-colors"
+            >
               Retry Connection
             </button>
           </div>
-        ) : loading && !marketData ? (
-          <div className="flex flex-col items-center justify-center py-32 space-y-4">
-            <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
-            <p className="text-slate-400 text-sm">Retrieving quotes from EODHD...</p>
-          </div>
         ) : marketData && selectedStock ? (
           <>
-            {/* Subtle Data Source Indicator */}
-            <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800/80 px-4 py-2 rounded-xl text-xs text-slate-400 font-mono">
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${selectedStock.price !== null ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
-                <span>Market data: <strong className="text-slate-200">EODHD</strong> ({selectedStock.dataStatus})</span>
-              </div>
-              <div>
-                Last retrieved: <strong className="text-slate-200">{selectedStock.dataTimestamp ? new Date(selectedStock.dataTimestamp).toLocaleString() : 'Unavailable'}</strong>
-              </div>
-            </div>
-
             {activeTab === 'portfolio' ? (
               /* My Portfolio Tab */
               <div className="space-y-6">
@@ -406,7 +459,7 @@ export default function App() {
                       <span>My SGX Investment Portfolio & Recommendations</span>
                     </h2>
                     <p className="text-xs text-slate-400 mt-1">
-                      Manage your SGX stock holdings, track portfolio valuation, EODHD-derived prices, dividend yields, and forecast signals.
+                      Manage your SGX stock holdings, track portfolio valuation, Yahoo Finance-derived prices, dividend yields, and forecast signals.
                     </p>
                   </div>
                   
@@ -507,7 +560,7 @@ export default function App() {
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="p-4 border-b border-slate-800 font-semibold text-sm text-white flex items-center justify-between">
                     <span>Portfolio Holdings & Forecast Signals</span>
-                    <span className="text-xs text-slate-400 font-normal">Pricing via EODHD</span>
+                    <span className="text-xs text-slate-400 font-normal">Pricing via Yahoo Finance</span>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
@@ -598,16 +651,34 @@ export default function App() {
                         <Grid className="w-5 h-5 text-emerald-400" />
                         <span>SGX Sector Volatility & Model-Generated Forecast Returns</span>
                       </h2>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Sector volatility relative to benchmark, paired with projected returns calculated using model baseline forecasts.
+                      <p className="text-xs text-slate-400">
+                        At-a-glance risk-adjusted sectoral comparison relative to the Straits Times Index, derived from noise-free trimmed baseline means. Click any sector to filter terminal.
                       </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400">Filter Terminal:</span>
+                      <select 
+                        value={selectedSector}
+                        onChange={(e) => {
+                          setSelectedSector(e.target.value);
+                          setActiveTab("terminal");
+                        }}
+                        className="bg-slate-950 text-xs font-mono font-bold text-emerald-400 px-3 py-1.5 rounded-xl border border-slate-800 focus:outline-none cursor-pointer"
+                      >
+                        {sectors.map(s => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </div>
 
-                {/* Heatmap Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {sectorHeatmapData.map((item: any) => {
+                  {sectorHeatmapData?.map((item: any) => {
+                    const isStable = parseFloat(item.avgVolatility) < 14;
+                    const isHighYield = parseFloat(item.avgDividendYield) > 5.0;
+                    const cardBorder = isStable && isHighYield ? 'border-emerald-700/60 bg-gradient-to-br from-slate-900 via-slate-900 to-emerald-950/30' : 'border-slate-800 bg-slate-900';
+
                     return (
                       <div 
                         key={item.sector}
@@ -615,31 +686,42 @@ export default function App() {
                           setSelectedSector(item.sector);
                           setActiveTab("terminal");
                         }}
-                        className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg hover:border-slate-600 transition-all cursor-pointer group flex flex-col justify-between space-y-4"
+                        className={`${cardBorder} border rounded-2xl p-6 space-y-4 hover:border-emerald-500/50 transition-all cursor-pointer group shadow-sm`}
                       >
-                        <div className="space-y-2">
-                          <div className="flex items-start justify-between">
-                            <span className="text-sm font-bold text-white group-hover:text-emerald-400 transition-colors">
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h3 className="text-base font-bold text-white group-hover:text-emerald-400 transition-colors">
                               {item.sector}
-                            </span>
-                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-slate-800 text-slate-300 border-slate-700">
-                              {item.stockCount} Active Equities
-                            </span>
+                            </h3>
+                            <p className="text-[11px] text-slate-400 mt-0.5">{item.stockCount} SGX Equities</p>
                           </div>
-                          <div className="flex items-center justify-between text-xs text-slate-400">
-                            <span>Volatility: <strong className="text-white font-mono">{item.avgVolatility}%</strong></span>
-                            <span>Div Yield: <strong className="text-emerald-400 font-mono">{item.avgDividendYield}%</strong></span>
-                            <span>Beta: <strong className="text-slate-300 font-mono">{item.avgBeta}</strong></span>
+                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${isStable ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800' : 'bg-amber-950/80 text-amber-400 border-amber-800'}`}>
+                            {isStable ? 'Low Risk / Stable' : 'Moderate Volatility'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-800/80">
+                          <div className="bg-slate-950/60 rounded-xl p-2.5 border border-slate-800/80">
+                            <div className="text-[10px] text-slate-400">Volatility</div>
+                            <div className="text-sm font-bold font-mono text-white mt-0.5">{item.avgVolatility}%</div>
+                          </div>
+                          <div className="bg-slate-950/60 rounded-xl p-2.5 border border-slate-800/80">
+                            <div className="text-[10px] text-slate-400">Div Yield</div>
+                            <div className="text-sm font-bold font-mono text-emerald-400 mt-0.5">{item.avgDividendYield}%</div>
+                          </div>
+                          <div className="bg-slate-950/60 rounded-xl p-2.5 border border-slate-800/80">
+                            <div className="text-[10px] text-slate-400">Beta vs STI</div>
+                            <div className="text-sm font-bold font-mono text-teal-300 mt-0.5">{item.avgBeta}</div>
                           </div>
                         </div>
 
-                        {/* Forecast Returns Box */}
-                        <div className="bg-slate-950/80 rounded-xl p-3 border border-slate-800 space-y-2">
-                          <div className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider flex items-center justify-between">
-                            <span>Model Forecast Return</span>
-                            <span className="text-slate-500">Model-generated</span>
+                        {/* Forecast Return Horizons (1W, 1M, 3M) */}
+                        <div className="space-y-1.5 pt-1 border-t border-slate-800/80">
+                          <div className="text-[10px] uppercase font-mono text-slate-400 flex items-center justify-between">
+                            <span>Shock-Free Forecast Returns</span>
+                            <span className="text-emerald-400">Trimmed Mean</span>
                           </div>
-                          <div className="grid grid-cols-3 gap-1.5 text-center font-mono">
+                          <div className="grid grid-cols-3 gap-2 text-center">
                             <div className="bg-slate-900/90 rounded-lg p-1.5 border border-slate-800">
                               <div className="text-[9px] text-slate-400">1 Week</div>
                               <div className={`text-xs font-bold ${parseFloat(item.avgWeekReturn) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
@@ -691,7 +773,7 @@ export default function App() {
                       <span>Financial News & Catalysts for {selectedStock.name} ({selectedStock.code})</span>
                     </h2>
                     <p className="text-xs text-slate-400 mt-1">
-                      Curated news feeds and research reports sourced via EODHD.
+                      Recent ticker-related financial news retrieved via Yahoo Finance.
                     </p>
                   </div>
                   <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800">
@@ -710,64 +792,126 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-4">
-                  {getStockNews(selectedStock).map(article => (
-                    <div key={article.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-slate-700 transition-all">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 text-xs text-slate-400">
-                          <span className="font-semibold text-emerald-400">{article.source}</span>
-                          <span>·</span>
-                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {article.time}</span>
+                {tickerNewsLoading ? (
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 font-mono text-xs">
+                    Loading Yahoo Finance news for {selectedStock.code}...
+                  </div>
+                ) : tickerNewsError ? (
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-rose-400 text-xs">
+                    {tickerNewsError}
+                  </div>
+                ) : tickerNews.length === 0 ? (
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 text-xs">
+                    No recent Yahoo Finance news found for {selectedStock.code}.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 gap-4">
+                    {tickerNews.map(article => (
+                      <div key={article.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-slate-700 transition-all flex flex-col justify-between">
+                        <div className="space-y-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2 text-xs text-slate-400">
+                              <span className="font-semibold text-emerald-400">News source: Yahoo Finance</span>
+                              <span>·</span>
+                              <span className="text-slate-300 font-medium">Publisher: {article.publisher}</span>
+                              <span>·</span>
+                              <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {formatRelativeTime(article.publishedAt)}</span>
+                            </div>
+                          </div>
+
+                          <h3 className="text-base font-semibold text-white leading-snug">
+                            {article.title}
+                          </h3>
+
+                          {article.relatedTickers && article.relatedTickers.length > 0 && (
+                            <div className="flex flex-wrap gap-1 pt-1">
+                              {article.relatedTickers.map((t: string) => (
+                                <span key={t} className="text-[10px] font-mono bg-slate-950 px-2 py-0.5 rounded border border-slate-800 text-teal-300">
+                                  {t}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                          Impact: {article.impact}
-                        </span>
+
+                        <div className="pt-2 flex items-center justify-end">
+                          <a 
+                            href={article.url} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 transition-colors"
+                          >
+                            Read article <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
                       </div>
-
-                      <h3 className="text-base font-semibold text-white">
-                        {article.title}
-                      </h3>
-
-                      <p className="text-xs text-slate-300 leading-relaxed">
-                        {article.summary}
-                      </p>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : activeTab === 'global-news' ? (
               /* Global Financial News Tab */
               <div className="space-y-6">
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-2">
-                  <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                    <Globe className="w-5 h-5 text-emerald-400" />
-                    <span>Global Macroeconomic & Financial News</span>
-                  </h2>
-                  <p className="text-xs text-slate-400">
-                    International market catalysts and interest rate trajectories affecting cross-border capital flows.
-                  </p>
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-2 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                      <Globe className="w-5 h-5 text-emerald-400" />
+                      <span>Global Macroeconomic & Financial News</span>
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Current global financial and macroeconomic headlines retrieved via Yahoo Finance.
+                    </p>
+                  </div>
+                  <button
+                    onClick={fetchGlobalNews}
+                    className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors self-start md:self-auto"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${globalNewsLoading ? 'animate-spin' : ''}`} /> Sync Global News
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {globalNews.map(article => (
-                    <div key={article.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-slate-700 transition-all flex flex-col justify-between">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between text-xs text-slate-400">
-                          <span className="font-semibold text-emerald-400">{article.source}</span>
-                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {article.time}</span>
+                {globalNewsLoading ? (
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 font-mono text-xs">
+                    Loading global macroeconomic news from Yahoo Finance...
+                  </div>
+                ) : globalNewsError ? (
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-rose-400 text-xs">
+                    {globalNewsError}
+                  </div>
+                ) : globalNews.length === 0 ? (
+                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 text-xs">
+                    Global market news is temporarily unavailable.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    {globalNews.map(article => (
+                      <div key={article.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-3 hover:border-slate-700 transition-all flex flex-col justify-between">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between text-xs text-slate-400">
+                            <span className="font-semibold text-emerald-400">{article.publisher}</span>
+                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {formatRelativeTime(article.publishedAt)}</span>
+                          </div>
+
+                          <h3 className="text-base font-semibold text-white leading-snug">
+                            {article.title}
+                          </h3>
                         </div>
 
-                        <h3 className="text-base font-semibold text-white leading-snug">
-                          {article.title}
-                        </h3>
-
-                        <p className="text-xs text-slate-300 leading-relaxed">
-                          {article.summary}
-                        </p>
+                        <div className="pt-3 flex items-center justify-between border-t border-slate-800/80">
+                          <span className="text-[10px] text-slate-400 font-mono">Source: Yahoo Finance</span>
+                          <a 
+                            href={article.url} 
+                            target="_blank" 
+                            rel="noopener noreferrer" 
+                            className="text-xs font-medium text-emerald-400 hover:text-emerald-300 flex items-center gap-1 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800 transition-colors"
+                          >
+                            Read article <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ) : (
               /* Equity Terminal View */
