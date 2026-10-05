@@ -1,6 +1,8 @@
-import yahooFinance from 'yahoo-finance2';
+import YahooFinance from "yahoo-finance2";
 
-const SGX_STOCKS_DEF = [
+const yahooFinance = new YahooFinance();
+
+const SGX_TICKERS = [
   { code: "D05.SI", name: "DBS Group Holdings Ltd", sector: "Banking & Financials", pe: 11.4, divYield: 5.2, beta: 0.98, rsi: 61.4, consensus: "BUY (18 Buy, 3 Hold, 0 Sell)", desc: "Southeast's largest bank by assets, renowned for robust net interest margins, digital leadership, and generous shareholder dividend yields." },
   { code: "O39.SI", name: "Overseas-Chinese Banking Corp", sector: "Banking & Financials", pe: 10.8, divYield: 5.6, beta: 0.94, rsi: 58.9, consensus: "BUY (15 Buy, 4 Hold, 0 Sell)", desc: "OCBC is Singapore's second largest financial services group, with strong wealth management franchise through Great Eastern and Bank of Singapore." },
   { code: "U11.SI", name: "United Overseas Bank Ltd", sector: "Banking & Financials", pe: 11.1, divYield: 5.4, beta: 1.02, rsi: 54.2, consensus: "HOLD (12 Buy, 8 Hold, 1 Sell)", desc: "UOB is a leading bank in Asia with a global network, particularly strong in Southeast Asian retail and wholesale commercial banking." },
@@ -17,15 +19,13 @@ export async function fetchStocksAndIndex() {
   const timestampIso = new Date().toISOString();
   let dbsDebugInfo: any = null;
 
-  // 1. Fetch stocks in parallel using Promise.allSettled
   const stockResults = await Promise.allSettled(
-    SGX_STOCKS_DEF.map(async (def) => {
+    SGX_TICKERS.map(async (def) => {
       const quote: any = await yahooFinance.quote(def.code);
       return { def, quote };
     })
   );
 
-  // 2. Fetch STI Index (^STI)
   let stiQuote: any = null;
   try {
     stiQuote = await yahooFinance.quote("^STI");
@@ -33,7 +33,7 @@ export async function fetchStocksAndIndex() {
     console.warn("Failed to fetch Straits Times Index (^STI):", e);
   }
 
-  const stocksList = SGX_STOCKS_DEF.map((def, idx) => {
+  const stocksList = SGX_TICKERS.map((def, idx) => {
     const res = stockResults[idx];
     if (res.status === 'fulfilled') {
       const { quote } = res.value;
@@ -63,18 +63,6 @@ export async function fetchStocksAndIndex() {
           volume: quote.regularMarketVolume ?? null,
           yahooTimestamp: quote.regularMarketTime ? new Date(quote.regularMarketTime).toISOString() : null
         };
-
-        console.log(`[Yahoo Finance Diagnostic - DBS]`);
-        console.log(`Symbol requested: ${def.code}`);
-        console.log(`Raw symbol: ${quote.symbol}`);
-        console.log(`Raw company name: ${quote.longName || quote.shortName}`);
-        console.log(`Raw currency: ${quote.currency}`);
-        console.log(`Raw exchange: ${quote.exchange}`);
-        console.log(`regularMarketPrice: ${quote.regularMarketPrice}`);
-        console.log(`previousClose: ${quote.regularMarketPreviousClose}`);
-        console.log(`dayHigh: ${quote.regularMarketDayHigh}, dayLow: ${quote.regularMarketDayLow}`);
-        console.log(`volume: ${quote.regularMarketVolume}`);
-        console.log(`yahooTimestamp: ${dbsDebugInfo.yahooTimestamp}`);
       }
 
       return {
@@ -121,7 +109,6 @@ export async function fetchStocksAndIndex() {
         dataTimestamp: quote.regularMarketTime ? new Date(quote.regularMarketTime).toISOString() : timestampIso
       };
     } else {
-      console.warn(`Failed to fetch Yahoo Finance quote for ${def.code}:`, res.reason);
       return {
         code: def.code,
         name: def.name,
