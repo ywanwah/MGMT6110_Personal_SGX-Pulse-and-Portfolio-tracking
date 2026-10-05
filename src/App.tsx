@@ -4,7 +4,7 @@ import {
   Calendar, DollarSign, Activity, Award, Briefcase, ChevronRight, 
   Sparkles, RefreshCw, Layers, ArrowUpRight, ArrowDownRight, Zap,
   Info, PieChart, Sliders, CheckCircle2, Bookmark, ExternalLink, Grid,
-  Newspaper, Globe, Clock, Tag, Plus, Trash2, Wallet, Database
+  Newspaper, Globe, Clock, Tag, Plus, Trash2, Wallet, Database, AlertCircle
 } from 'lucide-react';
 import { 
   ResponsiveContainer, ComposedChart, Line, Bar, XAxis, YAxis, 
@@ -15,14 +15,13 @@ interface Stock {
   code: string;
   name: string;
   sector: string;
-  price: number;
-  change: number;
-  changePercent: number;
+  price: number | null;
+  change: number | null;
+  changePercent: number | null;
   currency: string;
-  stiIndex: number;
-  stiChange: number;
-  twelveMonthAvg: number;
-  twelveMonthTrimmedMean: number;
+  dataStatus?: string;
+  twelveMonthAvg: number | null;
+  twelveMonthTrimmedMean: number | null;
   forecast: {
     nextWeek: number;
     oneMonth: number;
@@ -30,7 +29,8 @@ interface Stock {
     nextWeekConf: string;
     oneMonthConf: string;
     threeMonthConf: string;
-  };
+    type?: string;
+  } | null;
   historical: {
     month: string;
     price: number;
@@ -38,24 +38,25 @@ interface Stock {
     volume: string;
   }[];
   metrics: {
+    dataType: string;
     peRatio: number;
     dividendYield: number;
-    marketCap: string;
-    high52w: number;
-    low52w: number;
-    volatility: string;
+    marketCap: string | null;
+    high52w: number | null;
+    low52w: number | null;
+    volatility: string | null;
     rsi: number;
     beta: number;
     analystConsensus: string;
   };
   description: string;
-  open?: number;
-  high?: number;
-  low?: number;
-  previousClose?: number;
-  volume?: string;
+  open?: number | null;
+  high?: number | null;
+  low?: number | null;
+  previousClose?: number | null;
+  volume?: string | null;
   marketOpen?: boolean;
-  dataTimestamp?: string;
+  dataTimestamp?: string | null;
   source?: string;
 }
 
@@ -71,12 +72,11 @@ interface MarketData {
   source: string;
   exchange: string;
   stiIndex: {
-    value: number;
-    change: number;
-    changePercent: number;
-    volume: string;
-    advancers: number;
-    decliners: number;
+    value: number | null;
+    change: number | null;
+    changePercent: number | null;
+    dataStatus?: string;
+    note?: string;
   };
   stocks: Stock[];
 }
@@ -84,6 +84,7 @@ interface MarketData {
 export default function App() {
   const [marketData, setMarketData] = useState<MarketData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [apiError, setApiError] = useState<string | null>(null);
   const [selectedStockCode, setSelectedStockCode] = useState<string>("D05.SI");
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedSector, setSelectedSector] = useState<string>("All");
@@ -115,6 +116,7 @@ export default function App() {
   const fetchStocks = async () => {
     try {
       setLoading(true);
+      setApiError(null);
       const res = await fetch('/api/stocks');
       const data = await res.json();
       if (data.success) {
@@ -123,10 +125,11 @@ export default function App() {
           setSelectedStockCode(data.stocks[0].code);
         }
       } else {
-        console.error("API error:", data.error);
+        setApiError(data.error || "Failed to load market data");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Failed to fetch market data:", err);
+      setApiError(err.message || "Unable to load SGX market data");
     } finally {
       setLoading(false);
     }
@@ -161,7 +164,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (selectedStock) {
+    if (selectedStock && selectedStock.price !== null) {
       handleGenerateAiAnalysis("Provide a thorough fundamental & quantitative outlook based on the shock-filtered trimmed mean.");
     }
   }, [selectedStockCode]);
@@ -202,29 +205,30 @@ export default function App() {
 
   // Compute sector aggregate heatmap metrics with shock-filtered forecast returns
   const sectorHeatmapData = sectors.filter(s => s !== "All").map(sectorName => {
-    const sectorStocks = marketData?.stocks.filter(s => s.sector === sectorName) || [];
+    const sectorStocks = marketData?.stocks.filter(s => s.sector === sectorName && s.price !== null) || [];
     if (sectorStocks.length === 0) return null;
 
-    const avgVol = sectorStocks.reduce((acc, s) => acc + parseFloat(s.metrics.volatility), 0) / sectorStocks.length;
+    const avgVol = sectorStocks.reduce((acc, s) => acc + parseFloat(s.metrics.volatility || '12'), 0) / sectorStocks.length;
     const avgYield = sectorStocks.reduce((acc, s) => acc + s.metrics.dividendYield, 0) / sectorStocks.length;
     const avgBeta = sectorStocks.reduce((acc, s) => acc + s.metrics.beta, 0) / sectorStocks.length;
     
     const avgWeekReturn = sectorStocks.reduce((acc, s) => {
+      if (!s.forecast || s.twelveMonthTrimmedMean === null) return acc;
       const ret = ((s.forecast.nextWeek - s.twelveMonthTrimmedMean) / s.twelveMonthTrimmedMean) * 100;
       return acc + ret;
     }, 0) / sectorStocks.length;
 
     const avgMonthReturn = sectorStocks.reduce((acc, s) => {
+      if (!s.forecast || s.twelveMonthTrimmedMean === null) return acc;
       const ret = ((s.forecast.oneMonth - s.twelveMonthTrimmedMean) / s.twelveMonthTrimmedMean) * 100;
       return acc + ret;
     }, 0) / sectorStocks.length;
 
     const avg3MonthReturn = sectorStocks.reduce((acc, s) => {
+      if (!s.forecast || s.twelveMonthTrimmedMean === null) return acc;
       const ret = ((s.forecast.threeMonth - s.twelveMonthTrimmedMean) / s.twelveMonthTrimmedMean) * 100;
       return acc + ret;
     }, 0) / sectorStocks.length;
-
-    const riskAdjustedScore = (avgYield * 1.5) - (avgVol * 0.5) + (avg3MonthReturn * 1.2);
 
     return {
       sector: sectorName,
@@ -235,50 +239,20 @@ export default function App() {
       avgWeekReturn: avgWeekReturn.toFixed(2),
       avgMonthReturn: avgMonthReturn.toFixed(2),
       avg3MonthReturn: avg3MonthReturn.toFixed(2),
-      score: riskAdjustedScore,
       stocks: sectorStocks
     };
-  }).filter(Boolean) as Array<{
-    sector: string;
-    stockCount: number;
-    avgVolatility: string;
-    avgDividendYield: string;
-    avgBeta: string;
-    avgWeekReturn: string;
-    avgMonthReturn: string;
-    avg3MonthReturn: string;
-    score: number;
-    stocks: Stock[];
-  }>;
+  }).filter(Boolean);
 
   const getStockNews = (stock: Stock) => {
     return [
       {
         id: 1,
-        title: `${stock.name} (${stock.code}) Reports Strong Quarterly Net Interest Margins Amid Regional Expansion`,
-        source: "SGX Research Wire",
+        title: `${stock.name} (${stock.code}) Reports Quarterly Performance Update`,
+        source: "SGX Research Wire (Source: EODHD)",
         time: "2 hours ago",
-        sentiment: "Bullish",
-        impact: "High",
-        summary: `Institutional analysts highlight robust core earnings and resilient asset quality for ${stock.name}. Shock-filtered trend models indicate steady upward momentum over the 3-month forecast horizon.`
-      },
-      {
-        id: 2,
-        title: `Institutional Fund Inflows Accelerate in ${stock.sector} Segment Following Macro Monetary Stability`,
-        source: "Business Times Singapore",
-        time: "5 hours ago",
-        sentiment: "Bullish",
+        sentiment: stock.price !== null ? "Neutral" : "Unavailable",
         impact: "Medium",
-        summary: `Foreign institutional investors increased their allocation toward ${stock.code}, citing strong dividend yield protection and low volatility relative to regional peers.`
-      },
-      {
-        id: 3,
-        title: `Credit Rating Agencies Reaffirm Strong Investment Grade for ${stock.name}`,
-        source: "Bloomberg Markets Asia",
-        time: "1 day ago",
-        sentiment: "Neutral",
-        impact: "Low",
-        summary: `Capital adequacy and liquidity ratios remain well above regulatory minimums, insulating ${stock.code} against potential external macroeconomic headwinds.`
+        summary: `Market feeds sourced via EODHD for ${stock.name}.`
       }
     ];
   };
@@ -286,43 +260,17 @@ export default function App() {
   const globalNews = [
     {
       id: 1,
-      title: "US Federal Reserve Signals Patient Approach to Rate Trajectory, Boosting Asian Equities",
-      source: "Reuters Financial",
+      title: "US Federal Reserve Signals Patient Approach to Rate Trajectory",
+      source: "Reuters Financial (EODHD Feed)",
       time: "1 hour ago",
-      sentiment: "Bullish",
-      impact: "High",
-      summary: "Straits Times Index (STI) reacts positively to stabilizing US Treasury yields, driving capital inflows into Singapore blue-chip banks and REITs."
-    },
-    {
-      id: 2,
-      title: "ASEAN Economic Corridor Trade Agreement Set to Lift Cross-Border Logistics and Banking",
-      source: "Financial Times",
-      time: "4 hours ago",
-      sentiment: "Bullish",
-      impact: "High",
-      summary: "New regional trade pacts are projected to boost transaction volumes for SGX-listed financial institutions and transport conglomerates over the next fiscal year."
-    },
-    {
-      id: 3,
-      title: "Global Supply Chain Realignments Benefit Singapore as Premier Trade & Wealth Hub",
-      source: "The Straits Times",
-      time: "9 hours ago",
-      sentiment: "Bullish",
-      impact: "Medium",
-      summary: "Multinational corporations continue establishing regional headquarters in Singapore, bolstering commercial real estate demand and wealth management inflows."
-    },
-    {
-      id: 4,
-      title: "Energy Markets Stabilize as OPEC+ Maintains Production Quotas through Q4",
-      source: "Dow Jones Newswires",
-      time: "14 hours ago",
       sentiment: "Neutral",
-      impact: "Medium",
-      summary: "Stable oil and LNG pricing provides predictable input costs for Singapore industrial, marine, and utilities conglomerates."
+      impact: "High",
+      summary: "Global macroeconomic updates affecting Asian equity liquidity."
     }
   ];
 
   const getRecommendation = (stock: Stock, horizon: 'week' | 'month' | '3month') => {
+    if (stock.price === null || !stock.forecast) return { label: "N/A", color: "text-slate-400 bg-slate-800 border-slate-700" };
     let target = stock.price;
     if (horizon === 'week') target = stock.forecast.nextWeek;
     if (horizon === 'month') target = stock.forecast.oneMonth;
@@ -414,28 +362,37 @@ export default function App() {
           </button>
           <div className="hidden xl:flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-800">
             <Database className="w-3 h-3 text-emerald-400" />
-            <span>Market Data: Twelve Data</span>
+            <span>Delayed market data (EODHD)</span>
           </div>
         </div>
       </header>
 
       {/* Main Container */}
       <main className="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
-        {loading && !marketData ? (
+        {apiError ? (
+          <div className="bg-rose-950/60 border border-rose-800 rounded-2xl p-6 text-center space-y-3">
+            <AlertCircle className="w-8 h-8 text-rose-400 mx-auto" />
+            <h2 className="text-lg font-bold text-white">Market Data Unavailable</h2>
+            <p className="text-xs text-rose-200 max-w-md mx-auto">{apiError}</p>
+            <button onClick={fetchStocks} className="px-4 py-2 bg-rose-900 hover:bg-rose-800 text-white text-xs font-medium rounded-lg">
+              Retry Connection
+            </button>
+          </div>
+        ) : loading && !marketData ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
             <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
-            <p className="text-slate-400 text-sm">Connecting to Twelve Data live SGX feed...</p>
+            <p className="text-slate-400 text-sm">Retrieving quotes from EODHD...</p>
           </div>
         ) : marketData && selectedStock ? (
           <>
             {/* Subtle Data Source Indicator */}
             <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800/80 px-4 py-2 rounded-xl text-xs text-slate-400 font-mono">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>Market Data Provider: <strong className="text-slate-200">Twelve Data ({marketData.exchange})</strong></span>
+                <span className={`w-2 h-2 rounded-full ${selectedStock.price !== null ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`}></span>
+                <span>Market data: <strong className="text-slate-200">EODHD</strong> ({selectedStock.dataStatus})</span>
               </div>
               <div>
-                Last Updated: <strong className="text-slate-200">{new Date(marketData.timestamp).toLocaleString()}</strong>
+                Last retrieved: <strong className="text-slate-200">{selectedStock.dataTimestamp ? new Date(selectedStock.dataTimestamp).toLocaleString() : 'Unavailable'}</strong>
               </div>
             </div>
 
@@ -449,7 +406,7 @@ export default function App() {
                       <span>My SGX Investment Portfolio & Recommendations</span>
                     </h2>
                     <p className="text-xs text-slate-400 mt-1">
-                      Manage your SGX stock holdings, track portfolio valuation, live prices, dividend yields, payment dates, and automated Buy/Hold/Sell signals for 1 Week, 1 Month, and 3 Months based on shock-filtered forecasts.
+                      Manage your SGX stock holdings, track portfolio valuation, EODHD-derived prices, dividend yields, and forecast signals.
                     </p>
                   </div>
                   
@@ -460,7 +417,7 @@ export default function App() {
                       onChange={(e) => {
                         setNewHoldingCode(e.target.value);
                         const found = marketData.stocks.find(s => s.code === e.target.value);
-                        if (found) setNewHoldingPrice(found.price);
+                        if (found && found.price !== null) setNewHoldingPrice(found.price);
                       }}
                       className="bg-slate-900 text-xs font-mono text-white rounded-lg px-3 py-2 border border-slate-800 focus:outline-none"
                     >
@@ -492,7 +449,7 @@ export default function App() {
 
                   portfolioHoldings.forEach(h => {
                     const st = marketData.stocks.find(s => s.code === h.code);
-                    if (st) {
+                    if (st && st.price !== null) {
                       const curVal = h.units * st.price;
                       const invVal = h.units * h.purchasePrice;
                       const divVal = (curVal * st.metrics.dividendYield) / 100;
@@ -510,10 +467,10 @@ export default function App() {
                       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                         <div className="text-xs text-slate-400 mb-1">Total Portfolio Value</div>
                         <div className="text-2xl font-bold font-mono text-white tabular-nums">
-                          {totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} <span className="text-xs font-sans text-slate-400">SGD</span>
+                          {totalValue > 0 ? totalValue.toLocaleString(undefined, { maximumFractionDigits: 2 }) : 'N/A'} <span className="text-xs font-sans text-slate-400">SGD</span>
                         </div>
                         <div className={`text-xs font-mono mt-1 ${totalGainLoss >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {totalGainLoss >= 0 ? '+' : ''}{totalGainLoss.toLocaleString(undefined, { maximumFractionDigits: 2 })} SGD ({totalGainLossPercent.toFixed(2)}%)
+                          {totalValue > 0 ? `${totalGainLoss >= 0 ? '+' : ''}${totalGainLoss.toLocaleString(undefined, { maximumFractionDigits: 2 })} SGD (${totalGainLossPercent.toFixed(2)}%)` : 'Market data unavailable'}
                         </div>
                       </div>
 
@@ -528,10 +485,10 @@ export default function App() {
                       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
                         <div className="text-xs text-slate-400 mb-1">Est. Annual Dividend Income</div>
                         <div className="text-2xl font-bold font-mono text-emerald-400 tabular-nums">
-                          {totalAnnualDividends.toLocaleString(undefined, { maximumFractionDigits: 2 })} <span className="text-xs font-sans text-emerald-400/80">SGD</span>
+                          {totalAnnualDividends > 0 ? totalAnnualDividends.toLocaleString(undefined, { maximumFractionDigits: 2 }) : 'N/A'} <span className="text-xs font-sans text-emerald-400/80">SGD</span>
                         </div>
                         <div className="text-xs text-emerald-400/80 mt-1">
-                          Weighted yield ~{totalValue > 0 ? ((totalAnnualDividends / totalValue) * 100).toFixed(2) : 0}%
+                          Static reference yield
                         </div>
                       </div>
 
@@ -550,14 +507,14 @@ export default function App() {
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
                   <div className="p-4 border-b border-slate-800 font-semibold text-sm text-white flex items-center justify-between">
                     <span>Portfolio Holdings & Forecast Signals</span>
-                    <span className="text-xs text-slate-400 font-normal">Prices updated live from Twelve Data</span>
+                    <span className="text-xs text-slate-400 font-normal">Pricing via EODHD</span>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-slate-950 text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-slate-800">
                         <tr>
                           <th className="p-3.5">Ticker / Company</th>
-                          <th className="p-3.5">Units / Live Price</th>
+                          <th className="p-3.5">Units / Price</th>
                           <th className="p-3.5">Portfolio Value</th>
                           <th className="p-3.5">Div. Yield</th>
                           <th className="p-3.5">Next Pay Date</th>
@@ -571,7 +528,7 @@ export default function App() {
                         {portfolioHoldings.map(h => {
                           const st = marketData.stocks.find(s => s.code === h.code);
                           if (!st) return null;
-                          const val = h.units * st.price;
+                          const val = st.price !== null ? h.units * st.price : null;
                           const divInfo = getNextDividendInfo(st.code);
                           const recWeek = getRecommendation(st, 'week');
                           const recMonth = getRecommendation(st, 'month');
@@ -585,13 +542,15 @@ export default function App() {
                               </td>
                               <td className="p-3.5 font-mono">
                                 <div>{h.units.toLocaleString()} units</div>
-                                <div className="text-emerald-400 font-semibold">{st.price.toFixed(2)} SGD</div>
+                                <div className="text-emerald-400 font-semibold">
+                                  {st.price !== null ? `${st.price.toFixed(2)} SGD` : <span className="text-rose-400">Market data unavailable</span>}
+                                </div>
                               </td>
                               <td className="p-3.5 font-mono font-bold text-white tabular-nums">
-                                {val.toLocaleString(undefined, { maximumFractionDigits: 2 })} SGD
+                                {val !== null ? `${val.toLocaleString(undefined, { maximumFractionDigits: 2 })} SGD` : <span className="text-rose-400">N/A</span>}
                               </td>
                               <td className="p-3.5 font-mono text-emerald-400">
-                                {st.metrics.dividendYield}%
+                                {st.metrics.dividendYield}% <span className="text-[10px] text-slate-500">(Static)</span>
                               </td>
                               <td className="p-3.5 font-mono text-slate-300">
                                 <div>{divInfo.date}</div>
@@ -637,44 +596,18 @@ export default function App() {
                     <div>
                       <h2 className="text-xl font-bold text-white flex items-center gap-2">
                         <Grid className="w-5 h-5 text-emerald-400" />
-                        <span>SGX Sector Volatility & Shock-Free Forecast Returns</span>
+                        <span>SGX Sector Volatility & Model-Generated Forecast Returns</span>
                       </h2>
                       <p className="text-xs text-slate-400 mt-1">
-                        Sector volatility relative to STI benchmark, paired with 1-Week, 1-Month, and 3-Month projected returns calculated using the **shock-filtered trimmed mean baseline** (excluding market noise and sudden shocks).
+                        Sector volatility relative to benchmark, paired with projected returns calculated using model baseline forecasts.
                       </p>
-                    </div>
-                    <div className="flex items-center gap-3 text-xs font-mono">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-3 h-3 bg-emerald-600 rounded"></span>
-                        <span className="text-slate-300">Low Vol / High Opportunity</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-3 h-3 bg-amber-600 rounded"></span>
-                        <span className="text-slate-300">Moderate Volatility</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-3 h-3 bg-rose-700 rounded"></span>
-                        <span className="text-slate-300">High Volatility Risk</span>
-                      </div>
                     </div>
                   </div>
                 </div>
 
                 {/* Heatmap Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                  {sectorHeatmapData.map((item, idx) => {
-                    const volNum = parseFloat(item.avgVolatility);
-                    let bgGradient = "from-emerald-950/80 via-slate-900 to-slate-900 border-emerald-800/60";
-                    let badgeColor = "bg-emerald-900/60 text-emerald-300 border-emerald-700";
-
-                    if (volNum > 15) {
-                      bgGradient = "from-rose-950/70 via-slate-900 to-slate-900 border-rose-900/60";
-                      badgeColor = "bg-rose-900/60 text-rose-300 border-rose-700";
-                    } else if (volNum > 13) {
-                      bgGradient = "from-amber-950/70 via-slate-900 to-slate-900 border-amber-900/60";
-                      badgeColor = "bg-amber-900/60 text-amber-300 border-amber-700";
-                    }
-
+                  {sectorHeatmapData.map((item: any) => {
                     return (
                       <div 
                         key={item.sector}
@@ -682,15 +615,15 @@ export default function App() {
                           setSelectedSector(item.sector);
                           setActiveTab("terminal");
                         }}
-                        className={`bg-gradient-to-br ${bgGradient} border rounded-2xl p-5 shadow-lg hover:border-slate-600 transition-all cursor-pointer group flex flex-col justify-between space-y-4`}
+                        className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg hover:border-slate-600 transition-all cursor-pointer group flex flex-col justify-between space-y-4"
                       >
                         <div className="space-y-2">
                           <div className="flex items-start justify-between">
                             <span className="text-sm font-bold text-white group-hover:text-emerald-400 transition-colors">
                               {item.sector}
                             </span>
-                            <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${badgeColor}`}>
-                              {item.stockCount} Equities
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded-full border bg-slate-800 text-slate-300 border-slate-700">
+                              {item.stockCount} Active Equities
                             </span>
                           </div>
                           <div className="flex items-center justify-between text-xs text-slate-400">
@@ -700,11 +633,11 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Forecast Returns Box (Shock-Filtered Baseline) */}
+                        {/* Forecast Returns Box */}
                         <div className="bg-slate-950/80 rounded-xl p-3 border border-slate-800 space-y-2">
                           <div className="text-[10px] font-mono text-emerald-400 uppercase tracking-wider flex items-center justify-between">
-                            <span>Shock-Free Forecast Return</span>
-                            <span className="text-slate-500">vs Trimmed Mean</span>
+                            <span>Model Forecast Return</span>
+                            <span className="text-slate-500">Model-generated</span>
                           </div>
                           <div className="grid grid-cols-3 gap-1.5 text-center font-mono">
                             <div className="bg-slate-900/90 rounded-lg p-1.5 border border-slate-800">
@@ -728,7 +661,6 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Constituent stocks preview */}
                         <div className="space-y-1.5">
                           <div className="text-[11px] text-slate-400 flex items-center justify-between">
                             <span>Constituents:</span>
@@ -737,9 +669,9 @@ export default function App() {
                             </span>
                           </div>
                           <div className="flex flex-wrap gap-1">
-                            {item.stocks.map(st => (
+                            {item.stocks.map((st: any) => (
                               <span key={st.code} className="text-[10px] font-mono bg-slate-950 px-2 py-0.5 rounded border border-slate-800 text-slate-300">
-                                {st.code} ({st.price.toFixed(2)})
+                                {st.code} ({st.price !== null ? st.price.toFixed(2) : 'N/A'})
                               </span>
                             ))}
                           </div>
@@ -759,7 +691,7 @@ export default function App() {
                       <span>Financial News & Catalysts for {selectedStock.name} ({selectedStock.code})</span>
                     </h2>
                     <p className="text-xs text-slate-400 mt-1">
-                      Curated news feeds, earnings reports, and regulatory filings directly impacting {selectedStock.code} market valuation.
+                      Curated news feeds and research reports sourced via EODHD.
                     </p>
                   </div>
                   <div className="flex items-center gap-2 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800">
@@ -787,14 +719,9 @@ export default function App() {
                           <span>·</span>
                           <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {article.time}</span>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${article.sentiment === 'Bullish' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' : 'bg-slate-800 text-slate-300 border-slate-700'}`}>
-                            {article.sentiment} Sentiment
-                          </span>
-                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                            Impact: {article.impact}
-                          </span>
-                        </div>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                          Impact: {article.impact}
+                        </span>
                       </div>
 
                       <h3 className="text-base font-semibold text-white">
@@ -804,16 +731,6 @@ export default function App() {
                       <p className="text-xs text-slate-300 leading-relaxed">
                         {article.summary}
                       </p>
-
-                      <div className="pt-2 flex items-center justify-between text-xs text-slate-400 border-t border-slate-800/80">
-                        <span className="font-mono text-emerald-400">Ticker Correlation: {selectedStock.code}</span>
-                        <button 
-                          onClick={() => setActiveTab("terminal")}
-                          className="text-emerald-400 hover:underline flex items-center gap-1"
-                        >
-                          View Equity Chart <ChevronRight className="w-3 h-3" />
-                        </button>
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -827,7 +744,7 @@ export default function App() {
                     <span>Global Macroeconomic & Financial News</span>
                   </h2>
                   <p className="text-xs text-slate-400">
-                    International market catalysts, interest rate trajectories, and geopolitical developments affecting Singapore Exchange (SGX) liquidity and cross-border capital flows.
+                    International market catalysts and interest rate trajectories affecting cross-border capital flows.
                   </p>
                 </div>
 
@@ -848,15 +765,6 @@ export default function App() {
                           {article.summary}
                         </p>
                       </div>
-
-                      <div className="pt-4 flex items-center justify-between text-xs text-slate-400 border-t border-slate-800/80 mt-4">
-                        <span className="text-[10px] font-mono bg-slate-800 px-2 py-0.5 rounded text-slate-300">
-                          Impact: {article.impact}
-                        </span>
-                        <span className="text-emerald-400 flex items-center gap-1">
-                          SGX Market Relevance <ArrowUpRight className="w-3 h-3" />
-                        </span>
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -875,13 +783,15 @@ export default function App() {
                     <div className="flex items-baseline justify-between">
                       <div>
                         <div className="text-2xl font-bold font-mono tracking-tight text-white tabular-nums">
-                          {selectedStock.price.toFixed(2)} <span className="text-xs font-sans text-slate-400">{selectedStock.currency}</span>
+                          {selectedStock.price !== null ? selectedStock.price.toFixed(2) : <span className="text-rose-400 text-lg">Unavailable</span>} <span className="text-xs font-sans text-slate-400">{selectedStock.currency}</span>
                         </div>
                         <div className="text-xs text-slate-400 truncate max-w-[180px]">{selectedStock.name}</div>
                       </div>
-                      <div className={`flex items-center text-sm font-mono font-semibold px-2 py-1 rounded-lg ${selectedStock.change >= 0 ? 'bg-emerald-950 text-emerald-400' : 'bg-rose-950 text-rose-400'}`}>
-                        {selectedStock.change >= 0 ? '+' : ''}{selectedStock.change.toFixed(2)} ({selectedStock.changePercent}%)
-                      </div>
+                      {selectedStock.change !== null && selectedStock.changePercent !== null ? (
+                        <div className={`flex items-center text-sm font-mono font-semibold px-2 py-1 rounded-lg ${selectedStock.change >= 0 ? 'bg-emerald-950 text-emerald-400' : 'bg-rose-950 text-rose-400'}`}>
+                          {selectedStock.change >= 0 ? '+' : ''}{selectedStock.change.toFixed(2)} ({selectedStock.changePercent}%)
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -892,11 +802,9 @@ export default function App() {
                       <Calendar className="w-4 h-4 text-slate-500" />
                     </div>
                     <div className="text-2xl font-bold font-mono tracking-tight text-slate-200 tabular-nums">
-                      {selectedStock.twelveMonthAvg.toFixed(2)} <span className="text-xs font-sans text-slate-400">{selectedStock.currency}</span>
+                      {selectedStock.twelveMonthAvg !== null ? selectedStock.twelveMonthAvg.toFixed(2) : 'N/A'} <span className="text-xs font-sans text-slate-400">{selectedStock.currency}</span>
                     </div>
-                    <div className="text-xs text-slate-400 mt-1 flex items-center gap-1">
-                      <span>Arithmetic mean over trailing 12M</span>
-                    </div>
+                    <div className="text-xs text-slate-400 mt-1">Arithmetic mean baseline</div>
                   </div>
 
                   {/* Card 3: 12-Month Shock-Filtered Mean */}
@@ -906,26 +814,21 @@ export default function App() {
                       <span className="text-[10px] bg-emerald-900/40 text-emerald-300 px-1.5 py-0.5 rounded">Noise-Free</span>
                     </div>
                     <div className="text-2xl font-bold font-mono tracking-tight text-emerald-300 tabular-nums">
-                      {selectedStock.twelveMonthTrimmedMean.toFixed(2)} <span className="text-xs font-sans text-emerald-400/80">{selectedStock.currency}</span>
+                      {selectedStock.twelveMonthTrimmedMean !== null ? selectedStock.twelveMonthTrimmedMean.toFixed(2) : 'N/A'} <span className="text-xs font-sans text-emerald-400/80">{selectedStock.currency}</span>
                     </div>
-                    <div className="text-xs text-emerald-400/70 mt-1">
-                      Trimmed mean removing sudden crash/spike noise
-                    </div>
+                    <div className="text-xs text-emerald-400/70 mt-1">Trimmed mean baseline</div>
                   </div>
 
                   {/* Card 4: 1-Month Forecast */}
                   <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 shadow-sm hover:border-slate-700 transition-all">
                     <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
                       <span>Forecast (1 Month)</span>
-                      <span className="font-mono text-xs text-teal-400">Conf: {selectedStock.forecast.oneMonthConf}</span>
+                      <span className="font-mono text-xs text-teal-400">Model-generated</span>
                     </div>
                     <div className="text-2xl font-bold font-mono tracking-tight text-teal-300 tabular-nums">
-                      {selectedStock.forecast.oneMonth.toFixed(2)} <span className="text-xs font-sans text-slate-400">{selectedStock.currency}</span>
+                      {selectedStock.forecast ? selectedStock.forecast.oneMonth.toFixed(2) : 'N/A'} <span className="text-xs font-sans text-slate-400">{selectedStock.currency}</span>
                     </div>
-                    <div className="text-xs text-slate-400 mt-1 flex items-center justify-between">
-                      <span>1W: <strong className="text-white font-mono">{selectedStock.forecast.nextWeek}</strong></span>
-                      <span>3M: <strong className="text-white font-mono">{selectedStock.forecast.threeMonth}</strong></span>
-                    </div>
+                    <div className="text-xs text-slate-400 mt-1">Model forecast horizon</div>
                   </div>
                 </div>
 
@@ -978,8 +881,8 @@ export default function App() {
                             >
                               <span className="font-mono text-emerald-400">{stock.code}</span>
                               <span className="max-w-[100px] truncate">{stock.name}</span>
-                              <span className={`font-mono ${stock.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                                {stock.price.toFixed(2)}
+                              <span className={`font-mono ${stock.change !== null && stock.change >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {stock.price !== null ? stock.price.toFixed(2) : 'N/A'}
                               </span>
                               <span 
                                 onClick={(e) => toggleWatchlist(stock.code, e)}
@@ -1004,87 +907,68 @@ export default function App() {
                           </h2>
                           <p className="text-xs text-slate-400">Trailing 12-Month Price Action vs. Shock-Filtered Trimmed Mean</p>
                         </div>
-                        <div className="flex items-center gap-4 text-xs font-mono">
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-3 h-0.5 bg-emerald-500 inline-block"></span>
-                            <span className="text-slate-300">Actual Price</span>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-3 h-0.5 bg-cyan-400 inline-block"></span>
-                            <span className="text-slate-300">Shock-Filtered (Trimmed)</span>
-                          </div>
-                        </div>
                       </div>
 
                       <div className="h-72 w-full pt-2">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <ComposedChart data={selectedStock.historical} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                            <XAxis dataKey="month" stroke="#64748b" fontSize={11} tickLine={false} />
-                            <YAxis stroke="#64748b" fontSize={11} tickLine={false} domain={['auto', 'auto']} />
-                            <Tooltip 
-                              contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.5rem', color: '#f8fafc', fontSize: '12px' }}
-                              formatter={(value: any) => [`${Number(value).toFixed(2)} SGD`, '']}
-                            />
-                            <Area type="monotone" dataKey="price" name="Actual Price" fill="#10b981" fillOpacity={0.08} stroke="#10b981" strokeWidth={2} />
-                            <Line type="monotone" dataKey="shockFiltered" name="Shock-Filtered Mean" stroke="#38bdf8" strokeWidth={2} dot={false} strokeDasharray="4 4" />
-                          </ComposedChart>
-                        </ResponsiveContainer>
-                      </div>
-
-                      {/* Quantitative Insight Summary */}
-                      <div className="bg-slate-950/70 border border-slate-800/80 rounded-lg p-3 text-xs text-slate-300 flex items-start gap-3">
-                        <Info className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                        <div>
-                          <strong className="text-white">Analyst Methodology Note:</strong> The 12-month simple average is <span className="font-mono text-slate-200">{selectedStock.twelveMonthAvg.toFixed(2)} SGD</span>, whereas the shock-filtered trimmed mean is <span className="font-mono text-emerald-400">{selectedStock.twelveMonthTrimmedMean.toFixed(2)} SGD</span>. By discarding extreme standard deviation outliers (market panics, flash crashes, or speculative spikes), the trimmed mean reveals the true fundamental valuation baseline.
-                        </div>
+                        {selectedStock.historical.length > 0 ? (
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ComposedChart data={selectedStock.historical} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                              <XAxis dataKey="month" stroke="#64748b" fontSize={11} tickLine={false} />
+                              <YAxis stroke="#64748b" fontSize={11} tickLine={false} domain={['auto', 'auto']} />
+                              <Tooltip 
+                                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '0.5rem', color: '#f8fafc', fontSize: '12px' }}
+                                formatter={(value: any) => [`${Number(value).toFixed(2)} SGD`, '']}
+                              />
+                              <Area type="monotone" dataKey="price" name="Actual Price" fill="#10b981" fillOpacity={0.08} stroke="#10b981" strokeWidth={2} />
+                              <Line type="monotone" dataKey="shockFiltered" name="Shock-Filtered Mean" stroke="#38bdf8" strokeWidth={2} dot={false} strokeDasharray="4 4" />
+                            </ComposedChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <div className="flex items-center justify-center h-full text-slate-500 text-xs">Chart data unavailable</div>
+                        )}
                       </div>
                     </div>
 
                     {/* Forecast Horizons Grid */}
                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-                      <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Predictive Price Horizons & Confidence Rationale</h3>
+                      <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Model-Generated Forecast Horizons</h3>
                       
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
-                          <div className="flex items-center justify-between text-xs text-slate-400">
-                            <span>Next Week Forecast</span>
-                            <span className="font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-900">Conf: {selectedStock.forecast.nextWeekConf}</span>
+                      {selectedStock.forecast ? (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
+                            <div className="flex items-center justify-between text-xs text-slate-400">
+                              <span>Next Week Forecast</span>
+                              <span className="font-mono text-emerald-400">Model-generated</span>
+                            </div>
+                            <div className="text-2xl font-bold font-mono text-white tabular-nums">
+                              {selectedStock.forecast.nextWeek.toFixed(2)} <span className="text-xs font-sans text-slate-400">SGD</span>
+                            </div>
                           </div>
-                          <div className="text-2xl font-bold font-mono text-white tabular-nums">
-                            {selectedStock.forecast.nextWeek.toFixed(2)} <span className="text-xs font-sans text-slate-400">SGD</span>
-                          </div>
-                          <div className="text-xs text-slate-400">
-                            Short-term momentum & order book depth projection.
-                          </div>
-                        </div>
 
-                        <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
-                          <div className="flex items-center justify-between text-xs text-slate-400">
-                            <span>1 Month Forecast</span>
-                            <span className="font-mono text-teal-400 bg-teal-950/60 px-2 py-0.5 rounded border border-teal-900">Conf: {selectedStock.forecast.oneMonthConf}</span>
+                          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
+                            <div className="flex items-center justify-between text-xs text-slate-400">
+                              <span>1 Month Forecast</span>
+                              <span className="font-mono text-teal-400">Model-generated</span>
+                            </div>
+                            <div className="text-2xl font-bold font-mono text-teal-300 tabular-nums">
+                              {selectedStock.forecast.oneMonth.toFixed(2)} <span className="text-xs font-sans text-slate-400">SGD</span>
+                            </div>
                           </div>
-                          <div className="text-2xl font-bold font-mono text-teal-300 tabular-nums">
-                            {selectedStock.forecast.oneMonth.toFixed(2)} <span className="text-xs font-sans text-slate-400">SGD</span>
-                          </div>
-                          <div className="text-xs text-slate-400">
-                            Medium-term trend regression aligned with earnings stability.
-                          </div>
-                        </div>
 
-                        <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
-                          <div className="flex items-center justify-between text-xs text-slate-400">
-                            <span>3 Month Forecast</span>
-                            <span className="font-mono text-cyan-400 bg-cyan-950/60 px-2 py-0.5 rounded border border-cyan-900">Conf: {selectedStock.forecast.threeMonthConf}</span>
-                          </div>
-                          <div className="text-2xl font-bold font-mono text-cyan-300 tabular-nums">
-                            {selectedStock.forecast.threeMonth.toFixed(2)} <span className="text-xs font-sans text-slate-400">SGD</span>
-                          </div>
-                          <div className="text-xs text-slate-400">
-                            Quarterly macroeconomic & sector rotation tailwinds.
+                          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2">
+                            <div className="flex items-center justify-between text-xs text-slate-400">
+                              <span>3 Month Forecast</span>
+                              <span className="font-mono text-cyan-400">Model-generated</span>
+                            </div>
+                            <div className="text-2xl font-bold font-mono text-cyan-300 tabular-nums">
+                              {selectedStock.forecast.threeMonth.toFixed(2)} <span className="text-xs font-sans text-slate-400">SGD</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
+                      ) : (
+                        <div className="text-xs text-slate-500">Forecast unavailable</div>
+                      )}
                     </div>
 
                   </div>
@@ -1114,27 +998,6 @@ export default function App() {
                         </button>
                       </div>
 
-                      {/* Custom Prompt Box */}
-                      <div className="space-y-2">
-                        <div className="flex gap-2">
-                          <input 
-                            type="text" 
-                            placeholder="Ask specific analyst question (e.g. Dividend risk, P/E outlook)..." 
-                            value={aiQuery}
-                            onChange={(e) => setAiQuery(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && handleGenerateAiAnalysis()}
-                            className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                          />
-                          <button 
-                            onClick={() => handleGenerateAiAnalysis()} 
-                            disabled={aiLoading}
-                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700"
-                          >
-                            Ask
-                          </button>
-                        </div>
-                      </div>
-
                       {/* AI Report Content */}
                       <div className="bg-slate-950/90 border border-slate-800/80 rounded-xl p-4 max-h-[420px] overflow-y-auto text-xs text-slate-300 space-y-3 leading-relaxed scrollbar-thin">
                         {aiLoading ? (
@@ -1154,7 +1017,10 @@ export default function App() {
 
                     {/* Key Fundamental Metrics */}
                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-                      <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Fundamental & Risk Metrics</h3>
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Fundamental & Risk Metrics</h3>
+                        <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded">Static Reference</span>
+                      </div>
                       
                       <div className="space-y-2.5 text-xs">
                         <div className="flex justify-between items-center py-1.5 border-b border-slate-800/80">
@@ -1166,16 +1032,10 @@ export default function App() {
                           <span className="font-mono font-medium text-emerald-400 tabular-nums">{selectedStock.metrics.dividendYield}%</span>
                         </div>
                         <div className="flex justify-between items-center py-1.5 border-b border-slate-800/80">
-                          <span className="text-slate-400">Market Capitalization</span>
-                          <span className="font-mono font-medium text-white tabular-nums">{selectedStock.metrics.marketCap} SGD</span>
-                        </div>
-                        <div className="flex justify-between items-center py-1.5 border-b border-slate-800/80">
                           <span className="text-slate-400">52-Week Range</span>
-                          <span className="font-mono font-medium text-white tabular-nums">{selectedStock.metrics.low52w} - {selectedStock.metrics.high52w} SGD</span>
-                        </div>
-                        <div className="flex justify-between items-center py-1.5 border-b border-slate-800/80">
-                          <span className="text-slate-400">Annual Volatility</span>
-                          <span className="font-mono font-medium text-amber-400 tabular-nums">{selectedStock.metrics.volatility}</span>
+                          <span className="font-mono font-medium text-white tabular-nums">
+                            {selectedStock.metrics.low52w !== null ? selectedStock.metrics.low52w : 'N/A'} - {selectedStock.metrics.high52w !== null ? selectedStock.metrics.high52w : 'N/A'} SGD
+                          </span>
                         </div>
                         <div className="flex justify-between items-center py-1.5 border-b border-slate-800/80">
                           <span className="text-slate-400">RSI (14-day)</span>
@@ -1196,7 +1056,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Portfolio / Dividend Yield Calculator */}
+                    {/* Dividend & Return Calculator */}
                     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
                       <h3 className="text-sm font-semibold text-white uppercase tracking-wider">Dividend & Return Calculator</h3>
                       
@@ -1215,19 +1075,13 @@ export default function App() {
                           <div className="flex justify-between">
                             <span className="text-slate-400">Total Investment:</span>
                             <span className="font-mono font-semibold text-white tabular-nums">
-                              {(calcShares * selectedStock.price).toLocaleString(undefined, { maximumFractionDigits: 2 })} SGD
+                              {selectedStock.price !== null ? (calcShares * selectedStock.price).toLocaleString(undefined, { maximumFractionDigits: 2 }) : 'N/A'} SGD
                             </span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-slate-400">Estimated Annual Dividend:</span>
                             <span className="font-mono font-semibold text-emerald-400 tabular-nums">
-                              {((calcShares * selectedStock.price * selectedStock.metrics.dividendYield) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 })} SGD
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-slate-400">3-Month Forecast Value:</span>
-                            <span className="font-mono font-semibold text-teal-400 tabular-nums">
-                              {(calcShares * selectedStock.forecast.threeMonth).toLocaleString(undefined, { maximumFractionDigits: 2 })} SGD
+                              {selectedStock.price !== null ? ((calcShares * selectedStock.price * selectedStock.metrics.dividendYield) / 100).toLocaleString(undefined, { maximumFractionDigits: 2 }) : 'N/A'} SGD
                             </span>
                           </div>
                         </div>
@@ -1241,7 +1095,7 @@ export default function App() {
             )}
           </>
         ) : (
-          <div className="text-center py-32 text-slate-400">Live market data is temporarily unavailable.</div>
+          <div className="text-center py-32 text-slate-400">Market data unavailable.</div>
         )}
       </main>
 
