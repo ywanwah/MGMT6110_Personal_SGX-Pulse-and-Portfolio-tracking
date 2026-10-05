@@ -4,7 +4,7 @@ import {
   Calendar, DollarSign, Activity, Award, Briefcase, ChevronRight, 
   Sparkles, RefreshCw, Layers, ArrowUpRight, ArrowDownRight, Zap,
   Info, PieChart, Sliders, CheckCircle2, Bookmark, ExternalLink, Grid,
-  Newspaper, Globe, Clock, Tag, Plus, Trash2, Wallet
+  Newspaper, Globe, Clock, Tag, Plus, Trash2, Wallet, Database
 } from 'lucide-react';
 import { 
   ResponsiveContainer, ComposedChart, Line, Bar, XAxis, YAxis, 
@@ -49,6 +49,14 @@ interface Stock {
     analystConsensus: string;
   };
   description: string;
+  open?: number;
+  high?: number;
+  low?: number;
+  previousClose?: number;
+  volume?: string;
+  marketOpen?: boolean;
+  dataTimestamp?: string;
+  source?: string;
 }
 
 interface PortfolioItem {
@@ -60,6 +68,8 @@ interface PortfolioItem {
 
 interface MarketData {
   timestamp: string;
+  source: string;
+  exchange: string;
   stiIndex: {
     value: number;
     change: number;
@@ -107,9 +117,13 @@ export default function App() {
       setLoading(true);
       const res = await fetch('/api/stocks');
       const data = await res.json();
-      setMarketData(data);
-      if (data.stocks && data.stocks.length > 0 && !selectedStockCode) {
-        setSelectedStockCode(data.stocks[0].code);
+      if (data.success) {
+        setMarketData(data);
+        if (data.stocks && data.stocks.length > 0 && !selectedStockCode) {
+          setSelectedStockCode(data.stocks[0].code);
+        }
+      } else {
+        console.error("API error:", data.error);
       }
     } catch (err) {
       console.error("Failed to fetch market data:", err);
@@ -237,7 +251,6 @@ export default function App() {
     stocks: Stock[];
   }>;
 
-  // Mock curated stock-specific news based on selected stock
   const getStockNews = (stock: Stock) => {
     return [
       {
@@ -270,7 +283,6 @@ export default function App() {
     ];
   };
 
-  // Global financial news affecting SGX
   const globalNews = [
     {
       id: 1,
@@ -310,7 +322,6 @@ export default function App() {
     }
   ];
 
-  // Helper to determine Buy / Hold / Sell based on forecast vs current price (shock-filtered)
   const getRecommendation = (stock: Stock, horizon: 'week' | 'month' | '3month') => {
     let target = stock.price;
     if (horizon === 'week') target = stock.forecast.nextWeek;
@@ -323,7 +334,6 @@ export default function App() {
     return { label: "HOLD", color: "text-amber-400 bg-amber-950/80 border-amber-800" };
   };
 
-  // Helper for mock next dividend payment date
   const getNextDividendInfo = (code: string) => {
     const dates: Record<string, { date: string; amount: string }> = {
       "D05.SI": { date: "28 Nov 2026", amount: "0.54 SGD" },
@@ -354,7 +364,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Center Nav Tabs: Equity Terminal -> My Portfolio -> Volatility Heatmap -> Ticker News -> Global Macro News */}
+        {/* Center Nav Tabs */}
         <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 overflow-x-auto scrollbar-none">
           <button 
             onClick={() => setActiveTab("terminal")}
@@ -402,8 +412,9 @@ export default function App() {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span className="hidden sm:inline">Sync</span>
           </button>
-          <div className="hidden sm:block text-xs font-mono text-slate-400 bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-800">
-            STI: <strong className="text-emerald-400">{marketData?.stiIndex.value.toLocaleString()}</strong> ({marketData?.stiIndex.changePercent}%)
+          <div className="hidden xl:flex items-center gap-2 text-xs font-mono text-slate-400 bg-slate-800/50 px-3 py-1.5 rounded-lg border border-slate-800">
+            <Database className="w-3 h-3 text-emerald-400" />
+            <span>Market Data: Twelve Data</span>
           </div>
         </div>
       </header>
@@ -413,10 +424,21 @@ export default function App() {
         {loading && !marketData ? (
           <div className="flex flex-col items-center justify-center py-32 space-y-4">
             <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
-            <p className="text-slate-400 text-sm">Loading institutional SGX equities & shock-filtered models...</p>
+            <p className="text-slate-400 text-sm">Connecting to Twelve Data live SGX feed...</p>
           </div>
         ) : marketData && selectedStock ? (
           <>
+            {/* Subtle Data Source Indicator */}
+            <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800/80 px-4 py-2 rounded-xl text-xs text-slate-400 font-mono">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Market Data Provider: <strong className="text-slate-200">Twelve Data ({marketData.exchange})</strong></span>
+              </div>
+              <div>
+                Last Updated: <strong className="text-slate-200">{new Date(marketData.timestamp).toLocaleString()}</strong>
+              </div>
+            </div>
+
             {activeTab === 'portfolio' ? (
               /* My Portfolio Tab */
               <div className="space-y-6">
@@ -427,7 +449,7 @@ export default function App() {
                       <span>My SGX Investment Portfolio & Recommendations</span>
                     </h2>
                     <p className="text-xs text-slate-400 mt-1">
-                      Manage your SGX stock holdings, track portfolio valuation, dividend yields, payment dates, and automated Buy/Hold/Sell signals for 1 Week, 1 Month, and 3 Months based on shock-filtered forecasts.
+                      Manage your SGX stock holdings, track portfolio valuation, live prices, dividend yields, payment dates, and automated Buy/Hold/Sell signals for 1 Week, 1 Month, and 3 Months based on shock-filtered forecasts.
                     </p>
                   </div>
                   
@@ -526,15 +548,16 @@ export default function App() {
 
                 {/* Holdings Table with Recommendations */}
                 <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
-                  <div className="p-4 border-b border-slate-800 font-semibold text-sm text-white">
-                    Portfolio Holdings & Forecast Signals
+                  <div className="p-4 border-b border-slate-800 font-semibold text-sm text-white flex items-center justify-between">
+                    <span>Portfolio Holdings & Forecast Signals</span>
+                    <span className="text-xs text-slate-400 font-normal">Prices updated live from Twelve Data</span>
                   </div>
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead className="bg-slate-950 text-slate-400 uppercase font-mono text-[10px] tracking-wider border-b border-slate-800">
                         <tr>
                           <th className="p-3.5">Ticker / Company</th>
-                          <th className="p-3.5">Units / Price</th>
+                          <th className="p-3.5">Units / Live Price</th>
                           <th className="p-3.5">Portfolio Value</th>
                           <th className="p-3.5">Div. Yield</th>
                           <th className="p-3.5">Next Pay Date</th>
@@ -562,7 +585,7 @@ export default function App() {
                               </td>
                               <td className="p-3.5 font-mono">
                                 <div>{h.units.toLocaleString()} units</div>
-                                <div className="text-slate-400">{st.price.toFixed(2)} SGD</div>
+                                <div className="text-emerald-400 font-semibold">{st.price.toFixed(2)} SGD</div>
                               </td>
                               <td className="p-3.5 font-mono font-bold text-white tabular-nums">
                                 {val.toLocaleString(undefined, { maximumFractionDigits: 2 })} SGD
@@ -1218,7 +1241,7 @@ export default function App() {
             )}
           </>
         ) : (
-          <div className="text-center py-32 text-slate-400">No stock data available.</div>
+          <div className="text-center py-32 text-slate-400">Live market data is temporarily unavailable.</div>
         )}
       </main>
 

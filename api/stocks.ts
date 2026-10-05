@@ -1,23 +1,3 @@
-import express from 'express';
-import { createServer as createViteServer } from 'vite';
-import dotenv from 'dotenv';
-import { GoogleGenAI } from '@google/genai';
-
-dotenv.config();
-
-const app = express();
-app.use(express.json());
-
-// Initialize Gemini AI
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || '',
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
-});
-
 const SGX_TICKER_MAP: Record<string, { apiSymbol: string; name: string; sector: string; pe: number; divYield: number; beta: number; rsi: number; consensus: string; desc: string; basePrice: number }> = {
   "D05.SI": { apiSymbol: "D05", name: "DBS Group Holdings Ltd", sector: "Banking & Financials", pe: 11.4, divYield: 5.2, beta: 0.98, rsi: 61.4, consensus: "BUY (18 Buy, 3 Hold, 0 Sell)", desc: "Southeast's largest bank by assets, renowned for robust net interest margins, digital leadership, and generous shareholder dividend yields.", basePrice: 38.50 },
   "O39.SI": { apiSymbol: "O39", name: "Overseas-Chinese Banking Corp", sector: "Banking & Financials", pe: 10.8, divYield: 5.6, beta: 0.94, rsi: 58.9, consensus: "BUY (15 Buy, 4 Hold, 0 Sell)", desc: "OCBC is Singapore's second largest financial services group, with strong wealth management franchise through Great Eastern and Bank of Singapore.", basePrice: 15.80 },
@@ -31,7 +11,7 @@ const SGX_TICKER_MAP: Record<string, { apiSymbol: string; name: string; sector: 
   "S63.SI": { apiSymbol: "S63", name: "ST Engineering Ltd", sector: "Aerospace & Defense", pe: 20.4, divYield: 3.4, beta: 0.78, rsi: 67.5, consensus: "BUY (14 Buy, 3 Hold, 0 Sell)", desc: "ST Engineering is a global technology, defense and engineering group specializing in aerospace, smart cities, defense, and public security.", basePrice: 4.82 }
 };
 
-app.get('/api/stocks', async (req, res) => {
+export default async function handler(req: any, res: any) {
   const apiKey = process.env.TWELVE_DATA_API_KEY;
   const timestampIso = new Date().toISOString();
 
@@ -156,52 +136,4 @@ app.get('/api/stocks', async (req, res) => {
     },
     stocks: stocksList
   });
-});
-
-app.post('/api/ai-analysis', async (req, res) => {
-  try {
-    const { stockCode, query } = req.body;
-    
-    const prompt = `You are an elite, highly specialized financial analyst and senior equity strategist covering the Singapore Exchange (SGX).
-Provide an institutional-grade financial analysis report for stock ticker ${stockCode}.
-Additional User Query or Focus: ${query || "Provide comprehensive investment thesis, fundamental strength, macroeconomic drivers, and quantitative valuation."}
-
-Format the response cleanly in markdown with structured sections:
-1. Executive Investment Thesis & Summary
-2. Quantitative Trend Analysis (Highlighting shock-filtered trimmed mean baseline)
-3. Price Forecast Rationale & Probability Assessment (1-Week, 1-Month, 3-Month)
-4. Key Fundamental Risks & Catalysts
-`;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        systemInstruction: "You are a top-tier Wall Street / SGX quantitative financial analyst writing professional research reports for institutional portfolio managers.",
-        temperature: 0.3,
-      }
-    });
-
-    res.json({
-      success: true,
-      analysis: response.text || "Analysis generation completed.",
-      stock: stockCode
-    });
-  } catch (err: any) {
-    console.error("AI Analysis error:", err);
-    res.status(500).json({ success: false, error: err.message || "Failed to generate AI analysis" });
-  }
-});
-
-// Vite middleware setup for development
-const vite = await createViteServer({
-  server: { middlewareMode: true },
-  appType: 'spa',
-});
-
-app.use(vite.middlewares);
-
-const PORT = 3000;
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+}
