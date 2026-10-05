@@ -1,0 +1,7 @@
+{
+  "name": "SGX Pulse: Institutional Equity & Trend Analytics",
+  "description": "Advanced Singapore Exchange (SGX) analytics with shock-filtered 12-month averages, predictive forecasting, and institutional AI research.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
